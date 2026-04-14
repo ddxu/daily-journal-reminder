@@ -7,17 +7,16 @@ import sys
 # ========== 配置 ==========
 FEISHU_APP_ID = os.getenv('FEISHU_APP_ID')
 FEISHU_APP_SECRET = os.getenv('FEISHU_APP_SECRET')
-FEISHU_APP_TOKEN = os.getenv('FEISHU_APP_TOKEN')
+WIKI_NODE_TOKEN = os.getenv('FEISHU_APP_TOKEN')  # Wiki 的 node_token
 FEISHU_TABLE_ID = os.getenv('FEISHU_TABLE_ID')
 PUSHPLUS_TOKEN = os.getenv('PUSHPLUS_TOKEN')
-START_DATE = os.getenv('START_DATE')  # 格式: 2025-01-20
+START_DATE = os.getenv('START_DATE')
 
 # ========== 计算今天是第几天 ==========
 def get_today_day_number():
-    """根据 START_DATE 计算今天是 Day 几"""
     start = datetime.strptime(START_DATE, '%Y-%m-%d')
-    today = datetime.now() + timedelta(hours=8)  # GitHub Actions 是 UTC，转北京时间
-    diff = (today.date() - start.date()).days + 1  # Day 1 开始
+    today = datetime.now() + timedelta(hours=8)
+    diff = (today.date() - start.date()).days + 1
     return diff
 
 # ========== 获取飞书 Token ==========
@@ -35,14 +34,37 @@ def get_feishu_token():
         print(f"❌ 获取飞书 Token 失败: {data}")
         sys.exit(1)
 
+# ========== Wiki node_token 转 APP_TOKEN ==========
+def get_real_app_token(token):
+    """通过 Wiki API 获取真正的 bitable app_token"""
+    url = f"https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    params = {"token": WIKI_NODE_TOKEN}
+    
+    print(f"🔍 Wiki node_token: {WIKI_NODE_TOKEN}")
+    
+    response = requests.get(url, headers=headers, params=params)
+    print(f"🔍 Wiki API 状态码: {response.status_code}")
+    
+    data = response.json()
+    print(f"🔍 Wiki API 返回: {json.dumps(data, ensure_ascii=False)[:300]}")
+    
+    if data.get('code') == 0:
+        node = data.get('data', {}).get('node', {})
+        obj_token = node.get('obj_token', '')
+        obj_type = node.get('obj_type', '')
+        print(f"✅ 真正的 APP_TOKEN: {obj_token}")
+        print(f"✅ 类型: {obj_type}")
+        return obj_token
+    else:
+        print(f"⚠️ Wiki API 失败，尝试直接使用 node_token 作为 app_token")
+        return WIKI_NODE_TOKEN
+
 # ========== 提取文本内容 ==========
 def extract_text(field_value):
-    """
-    飞书多维表格的文本字段返回格式可能是：
-    1. 纯字符串: "hello"
-    2. 富文本数组: [{"text": "hello", "type": "text"}, ...]
-    这个函数统一处理
-    """
     if field_value is None:
         return "暂无内容"
     
@@ -50,7 +72,6 @@ def extract_text(field_value):
         return field_value
     
     if isinstance(field_value, list):
-        # 富文本格式，拼接所有 text
         result = ""
         for item in field_value:
             if isinstance(item, dict):
@@ -62,9 +83,10 @@ def extract_text(field_value):
     return str(field_value)
 
 # ========== 获取表格记录 ==========
-def get_records(token):
-    """获取所有记录"""
-    url = f"https://open.feishu.cn/open-apis/bitable/v3/apps/{FEISHU_APP_TOKEN}/tables/{FEISHU_TABLE_ID}/records"
+def get_records(token, app_token):
+    url = f"https://open.feishu.cn/open-apis/bitable/v3/apps/{app_token}/tables/{FEISHU_TABLE_ID}/records"
+    
+    print(f"🔍 请求 URL: {url}")
     
     headers = {
         "Authorization": f"Bearer {token}",
@@ -80,10 +102,14 @@ def get_records(token):
             params["page_token"] = page_token
         
         response = requests.get(url, headers=headers, params=params)
+        
+        print(f"🔍 HTTP 状态码: {response.status_code}")
+        print(f"🔍 返回内容前300字: {response.text[:300]}")
+        
         data = response.json()
         
         if data.get('code') != 0:
-            print(f"❌ 获取表格数据失败: {data}")
+            print(f"❌ 获取表格数据失败: {json.dumps(data, ensure_ascii=False)[:500]}")
             sys.exit(1)
         
         items = data.get('data', {}).get('items', [])
@@ -97,8 +123,6 @@ def get_records(token):
 
 # ========== 查找今天的记录 ==========
 def find_today_record(records, day_number):
-    """根据天数查找对应记录"""
-    
     target_patterns = [
         f"Day {day_number}",
         f"Day{day_number}",
@@ -110,8 +134,6 @@ def find_today_record(records, day_number):
     
     for record in records:
         fields = record.get('fields', {})
-        
-        # 查找「学习天数」字段
         day_value = fields.get('学习天数', '')
         day_text = extract_text(day_value).strip()
         
@@ -123,46 +145,28 @@ def find_today_record(records, day_number):
 
 # ========== 发送推送 ==========
 def send_to_pushplus(day_number, content1, content2, content3):
-    """发送三条独立消息到 Pushplus，方便分别复制"""
-    
     today_str = (datetime.now() + timedelta(hours=8)).strftime('%Y年%m月%d日')
     
-    # ===== 第1条：当日学习内容 =====
-    msg1 = f"""## 📚 Day {day_number} - 当日学习内容
-> {today_str}
-
-{content1}
-"""
-    
-    # ===== 第2条：周打卡任务 =====
-    msg2 = f"""## ✅ Day {day_number} - 周打卡任务
-> {today_str}
-
-{content2}
-"""
-    
-    # ===== 第3条：每日打卡接龙 =====
-    msg3 = f"""## 🔥 Day {day_number} - 每日打卡接龙
-> {today_str}
-
-{content3}
-"""
-    
-    # 合并成一条消息，用分隔线隔开，方便分段复制
     full_message = f"""# 📚 Day {day_number} 学习内容推送
 > {today_str}
 
 ---
 
-{msg1}
+## 📚 当日学习内容
+
+{content1}
 
 ---
 
-{msg2}
+## ✅ 周打卡任务
+
+{content2}
 
 ---
 
-{msg3}
+## 🔥 每日打卡接龙
+
+{content3}
 
 ---
 
@@ -205,8 +209,11 @@ def main():
     token = get_feishu_token()
     print("✅ 飞书 Token 获取成功")
     
+    # Wiki 转真正的 app_token
+    real_app_token = get_real_app_token(token)
+    
     # 获取所有记录
-    records = get_records(token)
+    records = get_records(token, real_app_token)
     print(f"✅ 获取到 {len(records)} 条记录")
     
     # 查找今天的记录
