@@ -126,7 +126,7 @@ def send_to_pushplus(day_number, content1, content2, content3):
     today_str = (datetime.now() + timedelta(hours=8)).strftime('%Y年%m月%d日')
 
     full_message = f"""
-<h2>📚 Day {day_number} 学习内容推送</h2>
+<h2>📚 钻石学位 Day {day_number} 学习内容推送</h2>
 <p style="color:#888;">{today_str}</p>
 <hr/>
 
