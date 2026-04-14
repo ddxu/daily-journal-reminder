@@ -125,30 +125,32 @@ def find_today_record(records, day_number):
 def send_to_pushplus(day_number, content1, content2, content3):
     today_str = (datetime.now() + timedelta(hours=8)).strftime('%Y年%m月%d日')
 
-    full_message = f"""# 📚 Day {day_number} 学习内容推送
-> {today_str}
+    full_message = f"""
+<h2>📚 Day {day_number} 学习内容推送</h2>
+<p style="color:#888;">{today_str}</p>
+<hr/>
 
----
+<h3>📚 部分一：当日学习内容</h3>
+<div style="background:#f5f5f5; padding:15px; border-radius:8px; margin:10px 0;">
+<pre style="white-space:pre-wrap; word-wrap:break-word; font-family:inherit; font-size:14px; line-height:1.8; margin:0;">{content1}</pre>
+</div>
 
-## 📚 当日学习内容
+<hr/>
 
-{content1}
+<h3>✅ 部分二：周打卡任务</h3>
+<div style="background:#f0f9f0; padding:15px; border-radius:8px; margin:10px 0;">
+<pre style="white-space:pre-wrap; word-wrap:break-word; font-family:inherit; font-size:14px; line-height:1.8; margin:0;">{content2}</pre>
+</div>
 
----
+<hr/>
 
-## ✅ 周打卡任务
+<h3>🔥 部分三：每日打卡接龙</h3>
+<div style="background:#fff8f0; padding:15px; border-radius:8px; margin:10px 0;">
+<pre style="white-space:pre-wrap; word-wrap:break-word; font-family:inherit; font-size:14px; line-height:1.8; margin:0;">{content3}</pre>
+</div>
 
-{content2}
-
----
-
-## 🔥 每日打卡接龙
-
-{content3}
-
----
-
-> 💡 以上3个部分可以分别复制，发送到对应的群
+<hr/>
+<p style="color:#888;">💡 三个部分分别长按复制，粘贴到对应微信群即可</p>
 """
 
     url = "http://www.pushplus.plus/send"
@@ -156,7 +158,7 @@ def send_to_pushplus(day_number, content1, content2, content3):
         "token": PUSHPLUS_TOKEN,
         "title": f"📚 Day {day_number} 学习内容",
         "content": full_message,
-        "template": "markdown"
+        "template": "html"
     }
 
     response = requests.post(url, json=payload)
