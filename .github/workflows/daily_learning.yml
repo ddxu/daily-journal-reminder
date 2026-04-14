@@ -1,0 +1,33 @@
+name: 钻石学位每日学习内容推送
+
+on:
+  schedule:
+    # 每天北京时间早上 8 点（UTC 0 点）
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  send-learning-content:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v3
+      
+      - name: 设置 Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: 安装依赖
+        run: pip install requests
+      
+      - name: 运行推送脚本
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_APP_TOKEN: ${{ secrets.FEISHU_APP_TOKEN }}
+          FEISHU_TABLE_ID: ${{ secrets.FEISHU_TABLE_ID }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          START_DATE: ${{ secrets.START_DATE }}
+        run: python fetch_and_send.py
