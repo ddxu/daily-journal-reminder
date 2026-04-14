@@ -1,0 +1,240 @@
+import requests
+import json
+from datetime import datetime, timedelta
+import os
+import sys
+
+# ========== 配置 ==========
+FEISHU_APP_ID = os.getenv('FEISHU_APP_ID')
+FEISHU_APP_SECRET = os.getenv('FEISHU_APP_SECRET')
+FEISHU_APP_TOKEN = os.getenv('FEISHU_APP_TOKEN')
+FEISHU_TABLE_ID = os.getenv('FEISHU_TABLE_ID')
+PUSHPLUS_TOKEN = os.getenv('PUSHPLUS_TOKEN')
+START_DATE = os.getenv('START_DATE')  # 格式: 2025-01-20
+
+# ========== 计算今天是第几天 ==========
+def get_today_day_number():
+    """根据 START_DATE 计算今天是 Day 几"""
+    start = datetime.strptime(START_DATE, '%Y-%m-%d')
+    today = datetime.now() + timedelta(hours=8)  # GitHub Actions 是 UTC，转北京时间
+    diff = (today.date() - start.date()).days + 1  # Day 1 开始
+    return diff
+
+# ========== 获取飞书 Token ==========
+def get_feishu_token():
+    url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+    payload = {
+        "app_id": FEISHU_APP_ID,
+        "app_secret": FEISHU_APP_SECRET
+    }
+    response = requests.post(url, json=payload)
+    data = response.json()
+    if data.get('code') == 0:
+        return data['tenant_access_token']
+    else:
+        print(f"❌ 获取飞书 Token 失败: {data}")
+        sys.exit(1)
+
+# ========== 提取文本内容 ==========
+def extract_text(field_value):
+    """
+    飞书多维表格的文本字段返回格式可能是：
+    1. 纯字符串: "hello"
+    2. 富文本数组: [{"text": "hello", "type": "text"}, ...]
+    这个函数统一处理
+    """
+    if field_value is None:
+        return "暂无内容"
+    
+    if isinstance(field_value, str):
+        return field_value
+    
+    if isinstance(field_value, list):
+        # 富文本格式，拼接所有 text
+        result = ""
+        for item in field_value:
+            if isinstance(item, dict):
+                result += item.get('text', '')
+            elif isinstance(item, str):
+                result += item
+        return result if result else "暂无内容"
+    
+    return str(field_value)
+
+# ========== 获取表格记录 ==========
+def get_records(token):
+    """获取所有记录"""
+    url = f"https://open.feishu.cn/open-apis/bitable/v3/apps/{FEISHU_APP_TOKEN}/tables/{FEISHU_TABLE_ID}/records"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    
+    all_records = []
+    page_token = None
+    
+    while True:
+        params = {"page_size": 100}
+        if page_token:
+            params["page_token"] = page_token
+        
+        response = requests.get(url, headers=headers, params=params)
+        data = response.json()
+        
+        if data.get('code') != 0:
+            print(f"❌ 获取表格数据失败: {data}")
+            sys.exit(1)
+        
+        items = data.get('data', {}).get('items', [])
+        all_records.extend(items)
+        
+        if not data.get('data', {}).get('has_more', False):
+            break
+        page_token = data['data'].get('page_token')
+    
+    return all_records
+
+# ========== 查找今天的记录 ==========
+def find_today_record(records, day_number):
+    """根据天数查找对应记录"""
+    
+    target_patterns = [
+        f"Day {day_number}",
+        f"Day{day_number}",
+        f"day {day_number}",
+        f"day{day_number}",
+        f"第{day_number}天",
+        str(day_number),
+    ]
+    
+    for record in records:
+        fields = record.get('fields', {})
+        
+        # 查找「学习天数」字段
+        day_value = fields.get('学习天数', '')
+        day_text = extract_text(day_value).strip()
+        
+        for pattern in target_patterns:
+            if pattern in day_text:
+                return fields
+    
+    return None
+
+# ========== 发送推送 ==========
+def send_to_pushplus(day_number, content1, content2, content3):
+    """发送三条独立消息到 Pushplus，方便分别复制"""
+    
+    today_str = (datetime.now() + timedelta(hours=8)).strftime('%Y年%m月%d日')
+    
+    # ===== 第1条：当日学习内容 =====
+    msg1 = f"""## 📚 Day {day_number} - 当日学习内容
+> {today_str}
+
+{content1}
+"""
+    
+    # ===== 第2条：周打卡任务 =====
+    msg2 = f"""## ✅ Day {day_number} - 周打卡任务
+> {today_str}
+
+{content2}
+"""
+    
+    # ===== 第3条：每日打卡接龙 =====
+    msg3 = f"""## 🔥 Day {day_number} - 每日打卡接龙
+> {today_str}
+
+{content3}
+"""
+    
+    # 合并成一条消息，用分隔线隔开，方便分段复制
+    full_message = f"""# 📚 Day {day_number} 学习内容推送
+> {today_str}
+
+---
+
+{msg1}
+
+---
+
+{msg2}
+
+---
+
+{msg3}
+
+---
+
+> 💡 以上3个部分可以分别复制，发送到对应的群
+"""
+    
+    url = "http://www.pushplus.plus/send"
+    payload = {
+        "token": PUSHPLUS_TOKEN,
+        "title": f"📚 Day {day_number} 学习内容",
+        "content": full_message,
+        "template": "markdown"
+    }
+    
+    response = requests.post(url, json=payload)
+    result = response.json()
+    
+    if result.get('code') == 200:
+        print("✅ 推送成功！")
+    else:
+        print(f"❌ 推送失败: {result}")
+        sys.exit(1)
+
+# ========== 主程序 ==========
+def main():
+    print("=" * 50)
+    print("🚀 每日学习内容推送")
+    print("=" * 50)
+    
+    # 计算今天是第几天
+    day_number = get_today_day_number()
+    print(f"📅 START_DATE: {START_DATE}")
+    print(f"📅 今天是: Day {day_number}")
+    
+    if day_number < 1 or day_number > 35:
+        print(f"⚠️ Day {day_number} 超出范围 (1-35)，跳过推送")
+        return
+    
+    # 获取飞书 Token
+    token = get_feishu_token()
+    print("✅ 飞书 Token 获取成功")
+    
+    # 获取所有记录
+    records = get_records(token)
+    print(f"✅ 获取到 {len(records)} 条记录")
+    
+    # 查找今天的记录
+    record = find_today_record(records, day_number)
+    
+    if not record:
+        print(f"⚠️ 没有找到 Day {day_number} 的记录")
+        print("📋 可用的记录：")
+        for r in records:
+            fields = r.get('fields', {})
+            day_val = extract_text(fields.get('学习天数', ''))
+            print(f"   - {day_val}")
+        return
+    
+    # 提取内容
+    content1 = extract_text(record.get('当日学习内容', None))
+    content2 = extract_text(record.get('周打卡任务', None))
+    content3 = extract_text(record.get('每日打卡接龙', None))
+    
+    print(f"✅ 当日学习内容: {content1[:50]}...")
+    print(f"✅ 周打卡任务: {content2[:50]}...")
+    print(f"✅ 每日打卡接龙: {content3[:50]}...")
+    
+    # 推送
+    send_to_pushplus(day_number, content1, content2, content3)
+    
+    print("=" * 50)
+    print("🎉 完成！")
+
+if __name__ == "__main__":
+    main()
