@@ -1,0 +1,27 @@
+name: 每日觉察日志提醒
+
+# 定时触发
+on:
+  schedule:
+    # UTC 时间，北京时间 = UTC + 8
+    # 下面是每天北京时间早上 8:00 触发
+    - cron: '0 0 * * *'
+  
+  # 也可以手动触发（方便测试）
+  workflow_dispatch:
+
+jobs:
+  send-reminder:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 发送觉察日志提醒到微信
+        run: |
+          curl -X POST http://www.pushplus.plus/send \
+            -H "Content-Type: application/json" \
+            -d '{
+              "token": "${{ secrets.PUSHPLUS_TOKEN }}",
+              "title": "🧘 今日觉察日志提醒",
+              "content": "<h3>今天的觉察日志还没写哦～</h3><br><p>👉 <a href=\"https://kcnqn3a3fjvp.feishu.cn/share/base/form/shrcn7m5AxspSPsyLe59mIRS5qg\">点击这里填写觉察日志</a></p><br><p>花几分钟记录一下今天的觉察吧 🌱</p>",
+              "template": "html"
+            }'
