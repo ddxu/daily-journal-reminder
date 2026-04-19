@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta
 import os
 import sys
+import re
 
 # ========== 配置 ==========
 FEISHU_APP_ID = os.getenv('FEISHU_APP_ID')
@@ -107,7 +108,6 @@ def find_today_record(records, day_number):
         f"day {day_number}",
         f"day{day_number}",
         f"第{day_number}天",
-        str(day_number),
     ]
 
     for record in records:
@@ -116,10 +116,15 @@ def find_today_record(records, day_number):
         day_text = extract_text(day_value).strip()
 
         for pattern in target_patterns:
-            if pattern in day_text:
+            if day_text == pattern:
                 return fields
 
+        numbers = re.findall(r'\d+', day_text)
+        if numbers and int(numbers[0]) == day_number:
+            return fields
+
     return None
+
 
 # ========== 发送推送 ==========
 def send_to_pushplus(day_number, content1, content2, content3):
